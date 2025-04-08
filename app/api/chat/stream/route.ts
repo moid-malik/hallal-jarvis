@@ -69,13 +69,20 @@ export async function HEAD(req: Request) {
 }
 
 export async function OPTIONS(req: Request) {
+  console.log("OPTIONS request received to /api/chat/stream");
+  
+  // Log request headers for debugging
+  const headers = Object.fromEntries(req.headers.entries());
+  console.log("OPTIONS request headers:", JSON.stringify(headers, null, 2));
+  
   return new Response(null, {
     status: 200,
     headers: {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Allow": "POST, OPTIONS"
+      "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+      "Access-Control-Max-Age": "86400",
+      "Allow": "POST, OPTIONS, GET"
     }
   });
 }
@@ -84,19 +91,33 @@ export async function OPTIONS(req: Request) {
 export async function POST(req: Request) {
   console.log("POST request received to /api/chat/stream");
   
+  // Log request headers for debugging
+  const headers = Object.fromEntries(req.headers.entries());
+  console.log("Request headers:", JSON.stringify(headers, null, 2));
+  
   try {
     // Get user authentication
     const { userId } = await auth();
     if (!userId) {
+      console.error("Authentication failed: No userId found");
       return NextResponse.json(
         { error: "Unauthorized" },
-        { status: 401 }
+        { 
+          status: 401,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+          }
+        }
       );
     }
 
     // Parse request body
     const body = await req.json();
     const { messages, newMessage, chatId } = body as ChatRequestBody;
+    
+    console.log(`Processing chat request for chatId: ${chatId}`);
 
     // Initialize Convex client
     const convex = getConvexClient();
@@ -183,17 +204,27 @@ export async function POST(req: Request) {
     return new Response(stream.readable, {
       headers: {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-transform",
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
-        "Access-Control-Allow-Origin": "*"
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With"
       }
     });
   } catch (error) {
     console.error("Error in API route:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
+      { 
+        status: 500,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+          "Cache-Control": "no-cache, no-transform"
+        }
+      }
     );
   }
 }
