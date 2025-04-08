@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Halal Jaravis",
+  title: "Halal Jarvis",
   description: "A modern islamic AI chat application built with Next.js and Convex",
 };
 

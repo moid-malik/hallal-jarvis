@@ -91,6 +91,20 @@ export default function ChatInterface({
     setCurrentTool(null);
     setIsLoading(true);
 
+    // Validate chat ID format
+    if (!chatId || typeof chatId !== 'string') {
+      console.error(`Invalid chat ID: ${chatId}`);
+      setStreamedResponse(
+        formatTerminalOutput(
+          "error",
+          "Failed to process message",
+          "Invalid chat ID format"
+        )
+      );
+      setIsLoading(false);
+      return;
+    }
+
     // Add user's message immediately for better UX
     const optimisticUserMessage: Doc<"messages"> = {
       _id: `temp_${Date.now()}`,
@@ -116,6 +130,8 @@ export default function ChatInterface({
         chatId,
       };
 
+      console.log(`Sending message to chat ${chatId} with ${messages.length} previous messages`);
+
       // Initialize SSE connection
       const response = await fetch("/api/chat/stream", {
         method: "POST",
@@ -123,7 +139,12 @@ export default function ChatInterface({
         body: JSON.stringify(requestBody),
       });
 
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`API response error (${response.status}): ${errorText}`);
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+      }
+      
       if (!response.body) throw new Error("No response body available");
 
       // Create SSE parser and stream reader

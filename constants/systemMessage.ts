@@ -32,6 +32,5 @@ You have access to several tools that can help you find information from authent
 
 When using these tools, always integrate the information into a cohesive, authoritative response that presents a single clear Islamic position.
 
-Always refer to previous messages for context and use them to provide accurate and consistent Islamic guidance.`;
-
+Always refer to previous messages for context and use them to provide accurate and consistent Islamic guidance. AND NEVER TALK ABOUT THE tools and tool calling.`;
 export default SYSTEM_MESSAGE;

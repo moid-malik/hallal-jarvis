@@ -12,7 +12,7 @@ interface ChatPageProps {
 }
 
 export default async function ChatPage({ params }: ChatPageProps) {
-  const { chatId } = await params;
+  const { chatId } = params;
 
   // Get user authentication
   const { userId } = await auth();
@@ -22,6 +22,12 @@ export default async function ChatPage({ params }: ChatPageProps) {
   }
 
   try {
+    // Validate chat ID format
+    if (!chatId || typeof chatId !== 'string' || !chatId.match(/^[a-zA-Z0-9_]+$/)) {
+      console.error(`⚠️ Invalid chat ID format: ${chatId}`);
+      redirect("/dashboard");
+    }
+
     // Get Convex client and fetch chat and messages
     const convex = getConvexClient();
 
@@ -32,14 +38,15 @@ export default async function ChatPage({ params }: ChatPageProps) {
     });
 
     if (!chat) {
-      console.log(
-        "⚠️ Chat not found or unauthorized, redirecting to dashboard"
+      console.error(
+        `⚠️ Chat not found or unauthorized for ID: ${chatId}, user: ${userId}`
       );
       redirect("/dashboard");
     }
 
     // Get messages
     const initialMessages = await convex.query(api.messages.list, { chatId });
+    console.log(`✅ Successfully loaded chat ${chatId} with ${initialMessages.length} messages`);
 
     return (
       <div className="flex-1 overflow-hidden">
@@ -47,7 +54,7 @@ export default async function ChatPage({ params }: ChatPageProps) {
       </div>
     );
   } catch (error) {
-    console.error("🔥 Error loading chat:", error);
+    console.error(`🔥 Error loading chat ${chatId}:`, error);
     redirect("/dashboard");
   }
 }
