@@ -1,31 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 
-// Create a route matcher for the chat stream API
-const isPublicRoute = [
-  "/api/chat/stream",
-  "/",
-  "/sign-in*",
-  "/sign-up*",
-];
-
-// This function will exclude the chat stream API from any middleware processing
-export default function middleware(req: NextRequest) {
-  const { pathname } = new URL(req.url);
-  
-  // Skip all middleware processing for the chat stream API
-  if (isPublicRoute.includes(pathname) || pathname === '/api/chat/stream') {
-    return NextResponse.next();
-  }
-  
-  // For all other routes, let the default Next.js middleware handle it
-  return NextResponse.next();
-}
+export default clerkMiddleware();
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and static files
+    // Skip Next.js internals and all static files, unless found in search params
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    // Only run for API routes
+    // Always run for API routes
     "/(api|trpc)(.*)",
   ],
 };

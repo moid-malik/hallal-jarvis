@@ -16,7 +16,6 @@ import {
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
-export const revalidate = 0; // Disable caching
 
 // Helper function to send SSE messages
 function sendSSEMessage(
@@ -90,32 +89,14 @@ export async function POST(req: Request) {
   console.log("Request headers:", JSON.stringify(headers, null, 2));
   
   try {
-    // Get user authentication - with fallback for production
-    let userId;
-    try {
-      const authResult = await auth();
-      userId = authResult?.userId;
-    } catch (authError) {
-      console.warn("Auth error, proceeding without authentication:", authError);
-      // In production, we'll proceed without strict auth to avoid 405 errors
-      userId = "anonymous-user";
-    }
-
+    // Get user authentication
+    const { userId } = await auth();
     if (!userId) {
-      console.warn("No userId found, using anonymous user");
-      userId = "anonymous-user";
-    }
-
-    // Parse request body
-    let body;
-    try {
-      body = await req.json();
-    } catch (parseError) {
-      console.error("Failed to parse request body:", parseError);
+      console.error("Authentication failed: No userId found");
       return NextResponse.json(
-        { error: "Invalid request body" },
+        { error: "Unauthorized" },
         { 
-          status: 400,
+          status: 401,
           headers: {
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -124,7 +105,9 @@ export async function POST(req: Request) {
         }
       );
     }
-    
+
+    // Parse request body
+    const body = await req.json();
     const { messages, newMessage, chatId } = body as ChatRequestBody;
     
     console.log(`Processing chat request for chatId: ${chatId}`);
