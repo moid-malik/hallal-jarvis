@@ -15,12 +15,8 @@ export default function LandingPage() {
             Halal Jaravis Assistant
           </h1>
           <p className="max-w-[600px] text-lg text-gray-600 md:text-xl/relaxed xl:text-2xl/relaxed">
-            Meet your new AI chat companion that goes beyond conversation - it
-            can actually get things done!
+          Meet your AI companion, here to assist with Islamic knowledge, guidance, and daily inspiration.
             <br />
-            <span className="text-gray-400 text-sm">
-              Powered by IBM&apos;s WxTools & your favourite LLM&apos;s.
-            </span>
           </p>
         </header>
 
