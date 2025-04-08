@@ -62,6 +62,9 @@ function sendSSEMessage(
 }
 
 export async function POST(req: Request) {
+  // Create a variable to hold the Convex client
+  let convex;
+  
   try {
     // Get user authentication
     const { userId } = await auth();
@@ -94,15 +97,23 @@ export async function POST(req: Request) {
     const { messages, newMessage, chatId } = requestBody;
     
     // Get Convex client with error handling
-    let convex;
     try {
       convex = getConvexClient();
-      if (!convex) {
-        throw new Error("Failed to initialize Convex client");
-      }
     } catch (error) {
       console.error("Error initializing Convex client:", error);
       return new Response(JSON.stringify({ error: "Failed to initialize database connection" }), {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        }
+      });
+    }
+
+    // Verify that the Convex client has the mutation method
+    if (!convex || typeof convex.mutation !== 'function') {
+      console.error("Invalid Convex client:", { convex });
+      return new Response(JSON.stringify({ error: "Database client is not properly initialized" }), {
         status: 500,
         headers: {
           'Content-Type': 'application/json',
@@ -133,10 +144,15 @@ export async function POST(req: Request) {
 
         // Send user message to Convex with error handling
         try {
-          await convex.mutation(api.messages.send, {
-            chatId,
-            content: newMessage,
-          });
+          // Double-check that convex.mutation is a function before calling it
+          if (typeof convex.mutation === 'function') {
+            await convex.mutation(api.messages.send, {
+              chatId,
+              content: newMessage,
+            });
+          } else {
+            throw new Error("Convex mutation method is not available");
+          }
         } catch (convexError) {
           console.error("Error sending message to Convex:", convexError);
           // Continue execution even if Convex save fails
@@ -247,6 +263,8 @@ export async function POST(req: Request) {
                 content: `Error processing message: ${errorMessage}`,
                 role: "assistant",
               });
+            } else {
+              console.warn("Skipping error storage: Convex client not available");
             }
           } catch (storeError) {
             console.error("Failed to store error message:", storeError);
