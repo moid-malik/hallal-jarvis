@@ -14,28 +14,102 @@ import {
 
 export const runtime = "edge";
 
+// Define allowed methods
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
+// Explicitly define all HTTP methods
+export async function GET() {
+  return new Response(JSON.stringify({ error: "Method not allowed" }), {
+    status: 405,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Allow': 'POST, OPTIONS'
+    }
+  });
+}
+
+// Add OPTIONS method to handle preflight requests
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Allow': 'POST, OPTIONS'
+    },
+  });
+}
+
 function sendSSEMessage(
   writer: WritableStreamDefaultWriter<Uint8Array>,
   data: StreamMessage
 ) {
-  const encoder = new TextEncoder();
-  return writer.write(
-    encoder.encode(
-      `${SSE_DATA_PREFIX}${JSON.stringify(data)}${SSE_LINE_DELIMITER}`
-    )
-  );
+  try {
+    const encoder = new TextEncoder();
+    return writer.write(
+      encoder.encode(
+        `${SSE_DATA_PREFIX}${JSON.stringify(data)}${SSE_LINE_DELIMITER}`
+      )
+    );
+  } catch (error) {
+    console.error("Error in sendSSEMessage:", error);
+    // Return a resolved promise to prevent unhandled promise rejections
+    return Promise.resolve();
+  }
 }
 
 export async function POST(req: Request) {
   try {
+    // Get user authentication
     const { userId } = await auth();
+    
+    // Better error handling for authentication
     if (!userId) {
-      return new Response("Unauthorized", { status: 401 });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        }
+      });
     }
 
-    const { messages, newMessage, chatId } =
-      (await req.json()) as ChatRequestBody;
-    const convex = getConvexClient();
+    // Parse request body with error handling
+    let requestBody: ChatRequestBody;
+    try {
+      requestBody = await req.json() as ChatRequestBody;
+    } catch (error) {
+      return new Response(JSON.stringify({ error: "Invalid request body" }), {
+        status: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        }
+      });
+    }
+
+    const { messages, newMessage, chatId } = requestBody;
+    
+    // Get Convex client with error handling
+    let convex;
+    try {
+      convex = getConvexClient();
+      if (!convex) {
+        throw new Error("Failed to initialize Convex client");
+      }
+    } catch (error) {
+      console.error("Error initializing Convex client:", error);
+      return new Response(JSON.stringify({ error: "Failed to initialize database connection" }), {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        }
+      });
+    }
 
     // Create stream with larger queue strategy for better performance
     const stream = new TransformStream({}, { highWaterMark: 1024 });
@@ -44,9 +118,10 @@ export async function POST(req: Request) {
     const response = new Response(stream.readable, {
       headers: {
         "Content-Type": "text/event-stream",
-        // "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
         "X-Accel-Buffering": "no", // Disable buffering for nginx which is required for SSE to work properly
+        "Access-Control-Allow-Origin": "*",
       },
     });
 
@@ -56,13 +131,18 @@ export async function POST(req: Request) {
         // Send initial connection established message
         await sendSSEMessage(writer, { type: StreamMessageType.Connected });
 
-        // Send user message to Convex
-        await convex.mutation(api.messages.send, {
-          chatId,
-          content: newMessage,
-        });
+        // Send user message to Convex with error handling
+        try {
+          await convex.mutation(api.messages.send, {
+            chatId,
+            content: newMessage,
+          });
+        } catch (convexError) {
+          console.error("Error sending message to Convex:", convexError);
+          // Continue execution even if Convex save fails
+        }
 
-        // Convert messages to LangChain format
+        // Convert messages to LangChain format with error handling
         const langChainMessages = [
           ...messages.map((msg) =>
             msg.role === "user"
@@ -73,14 +153,20 @@ export async function POST(req: Request) {
         ];
 
         try {
-          // Create the event stream
+          // Create the event stream with error handling
           const eventStream = await submitQuestion(langChainMessages, chatId);
+          
+          if (!eventStream) {
+            throw new Error("Failed to create event stream");
+          }
 
           // Process the events
           for await (const event of eventStream) {
+            // Skip null or undefined events
+            if (!event) continue;
 
             if (event.event === "on_chat_model_stream") {
-              const token = event.data.chunk;
+              const token = event.data?.chunk;
               if (token) {
                 // Handle different content formats
                 if (typeof token.content === 'string') {
@@ -105,19 +191,28 @@ export async function POST(req: Request) {
                 }
               }
             } else if (event.event === "on_tool_start") {
-              await sendSSEMessage(writer, {
-                type: StreamMessageType.ToolStart,
-                tool: event.name || "unknown",
-                input: event.data.input,
-              });
+              if (event.name && event.data?.input) {
+                await sendSSEMessage(writer, {
+                  type: StreamMessageType.ToolStart,
+                  tool: event.name || "unknown",
+                  input: event.data.input,
+                });
+              }
             } else if (event.event === "on_tool_end") {
-              const toolMessage = new ToolMessage(event.data.output);
-
-              await sendSSEMessage(writer, {
-                type: StreamMessageType.ToolEnd,
-                tool: toolMessage.lc_kwargs.name || "unknown",
-                output: event.data.output,
-              });
+              if (event.data?.output) {
+                try {
+                  const toolMessage = new ToolMessage(event.data.output);
+                  const toolName = toolMessage.lc_kwargs?.name || "unknown";
+                  await sendSSEMessage(writer, {
+                    type: StreamMessageType.ToolEnd,
+                    tool: toolName,
+                    output: event.data.output,
+                  });
+                } catch (toolError) {
+                  console.error("Error processing tool message:", toolError);
+                  // Continue execution even if tool message processing fails
+                }
+              }
             }
           }
 
@@ -125,23 +220,62 @@ export async function POST(req: Request) {
           await sendSSEMessage(writer, { type: StreamMessageType.Done });
         } catch (streamError) {
           console.error("Error in event stream:", streamError);
-          await sendSSEMessage(writer, {
-            type: StreamMessageType.Error,
-            error:
-              streamError instanceof Error
-                ? streamError.message
-                : "Stream processing failed",
+          const errorMessage = streamError instanceof Error ? streamError.message : "Stream processing failed";
+          
+          // Log detailed error for debugging
+          console.error("Stream error details:", {
+            error: streamError,
+            chatId,
+            messageCount: messages.length,
           });
+          
+          // Send error message to client
+          try {
+            await sendSSEMessage(writer, {
+              type: StreamMessageType.Error,
+              error: errorMessage,
+            });
+          } catch (sendError) {
+            console.error("Failed to send error message:", sendError);
+          }
+          
+          // Store error in Convex for tracking
+          try {
+            if (convex && typeof convex.mutation === 'function') {
+              await convex.mutation(api.messages.store, {
+                chatId,
+                content: `Error processing message: ${errorMessage}`,
+                role: "assistant",
+              });
+            }
+          } catch (storeError) {
+            console.error("Failed to store error message:", storeError);
+          }
         }
       } catch (error) {
         console.error("Error in stream:", error);
-        await sendSSEMessage(writer, {
-          type: StreamMessageType.Error,
-          error: error instanceof Error ? error.message : "Unknown error",
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        
+        // Log detailed error for debugging
+        console.error("Stream processing error details:", {
+          error,
+          chatId,
         });
+        
+        // Send error message to client
+        try {
+          await sendSSEMessage(writer, {
+            type: StreamMessageType.Error,
+            error: errorMessage,
+          });
+        } catch (sendError) {
+          console.error("Failed to send error message:", sendError);
+        }
       } finally {
         try {
-          await writer.close();
+          if (writer && typeof writer.close === 'function') {
+            await writer.close();
+          }
         } catch (closeError) {
           console.error("Error closing writer:", closeError);
         }
@@ -151,9 +285,20 @@ export async function POST(req: Request) {
     return response;
   } catch (error) {
     console.error("Error in chat API:", error);
+    const errorMessage = error instanceof Error ? error.message : "Failed to process chat request";
+    
+    // Log detailed error for debugging
+    console.error("Chat API error details:", { error });
+    
     return NextResponse.json(
-      { error: "Failed to process chat request" } as const,
-      { status: 500 }
+      { error: errorMessage },
+      { 
+        status: 500,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'application/json',
+        }
+      }
     );
   }
 }
